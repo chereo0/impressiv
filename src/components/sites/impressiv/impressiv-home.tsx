@@ -1,10 +1,13 @@
 import Image from "next/image";
-import { ReelsList } from "./reels-list";
+import { cn } from "@/lib/utils";
 import { Reveal } from "./reveal";
-import { EventTvWall } from "./tv-wall/event-tv-wall";
 import { SiteShell } from "./site-shell";
-import { WorkSlider } from "./work-slider";
+import { PROJECTS } from "./venue/content";
+import { VenueExperience } from "./venue/venue-experience";
 import styles from "./impressiv.module.css";
+import v from "./venue/venue.module.css";
+
+const REEL = "https://impressiv.com.sa/reel/";
 
 const SOCIALS = [
   { label: "Facebook", glyph: "", href: "https://www.facebook.com/impressivlive/" },
@@ -15,80 +18,117 @@ const SOCIALS = [
   { label: "WhatsApp", glyph: "", href: "http://wa.link/frlwct" },
 ];
 
-function VerticalLine({ className }: { className?: string }) {
-  return (
-    <Image
-      className={className ? `${styles.vline} ${className}` : styles.vline}
-      src="/sites/impressiv/vertical-line.svg"
-      alt=""
-      width={3}
-      height={534}
-    />
-  );
-}
-
+/**
+ * The home page is a walk through one event hall. Each section below is a camera
+ * stop (`data-station`, in order); its panel stays pinned while the camera arrives.
+ */
 export function ImpressivHome() {
   return (
-    <SiteShell>
-      <main>
-        <EventTvWall />
+    <SiteShell scene={<VenueExperience />}>
+      <main className={v.main}>
+        {/* 0 · entrance */}
+        <section className={v.station} data-station="entrance" aria-label="Welcome">
+          <div className={cn(v.sticky, v.center)}>
+            <Reveal variant="rise" className={cn(v.panel, v.bare)}>
+              <p className={v.eyebrow}>Live events · Exhibitions · Shows</p>
+              <h1 className={v.heroTitle}>We do it live!</h1>
+              <p className={v.heroSub}>
+                ImpressIV produces events, exhibitions and shows across the Kingdom, from concept to the last cue.
+              </p>
+              <a className={v.button} href="http://wa.link/frlwct">
+                Contact us!
+              </a>
+              <p className={v.scrollHint}>SCROLL TO STEP INSIDE ↓</p>
+            </Reveal>
+          </div>
+        </section>
 
-        <section className={styles.how}>
-          <div className={styles.howText}>
-            <Reveal>
-              <h2 className={styles.eyebrow}>HOW WE DO IT</h2>
-              <h2 className={styles.howTitle}>
+        {/* 1 · the hall */}
+        <section className={v.station} data-station="hall" aria-labelledby="how-title">
+          <div className={cn(v.sticky, v.left)}>
+            <Reveal className={v.panel}>
+              <p className={v.eyebrow}>How we do it</p>
+              <h2 id="how-title" className={v.title}>
                 We engage the world’s most creative minds to take your projects to a whole new level
               </h2>
-              <h2 className={styles.howFoot}>Featured projects</h2>
+              <p className={v.body}>
+                Stage design, LED and lighting, sound, content and show calling. One team runs the whole night.
+              </p>
+              <p className={v.meta}>Featured projects ↓</p>
             </Reveal>
-          </div>
-          <div className={styles.howLine}>
-            <VerticalLine />
           </div>
         </section>
 
-        <section className={styles.reels}>
-          <div className={styles.reelsText}>
-            <Reveal variant="swing">
-              <h2 className={styles.reelsTitle}>
-                <a href="https://impressiv.com.sa/reel/">Reels</a>
+        {/* 2 · LED cube */}
+        <section className={v.station} data-station="cube" aria-labelledby="reels-title">
+          <div className={cn(v.sticky, v.left)}>
+            <Reveal variant="swing" className={v.panel}>
+              <h2 id="reels-title" className={v.reelsTitle}>
+                <a href={REEL}>Reels</a>
               </h2>
-              <ReelsList />
+              <div className={v.reelsList}>
+                {["Events", "Exhibition", "Shows", "Making off"].map((item) => (
+                  <a key={item} href={REEL}>
+                    {item.toUpperCase()}
+                  </a>
+                ))}
+              </div>
             </Reveal>
           </div>
-          <Reveal variant="rise" className={styles.reelsImageWrap}>
-            <div className={styles.reelsImage} role="img" aria-label="Camera operator filming an event" />
-          </Reveal>
         </section>
 
-        <Reveal variant="rise">
-          <WorkSlider />
-        </Reveal>
-
-        <section className={styles.testimonial}>
-          <VerticalLine className={styles.testLine} />
-          <Reveal>
-            <h2 className={styles.testTitle}>TESTIMONIAL</h2>
-            <h2 className={styles.testEyebrow}>RIYADH INTERNATIONAL BOOK FAIR 2019</h2>
-            <h2 className={styles.testQuote}>
-              We planned a good event and we were delivered an incredible experience, that left everyone
-              speechless. Our collaboration with ImpressIV went on very smoothly and it was a great pleasure to
-              interact with the team.
-            </h2>
-          </Reveal>
+        {/* 3 · project screens */}
+        <section className={v.station} data-station="screens" aria-labelledby="work-title">
+          <div className={cn(v.sticky, v.right)}>
+            <Reveal className={v.panel}>
+              <p className={v.eyebrow}>On the screens</p>
+              <h2 id="work-title" className={v.title}>
+                Featured work
+              </h2>
+              <div className={v.projects}>
+                {PROJECTS.map((p) => (
+                  <a key={p.title} className={v.project} href={p.href}>
+                    <Image className={v.projectThumb} src={p.image} alt="" width={220} height={124} />
+                    <span>
+                      <span className={v.projectTitle}>{p.title}</span>
+                      <span className={v.projectSub}>{p.subtitle}</span>
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </Reveal>
+          </div>
         </section>
 
-        <section className={styles.cta}>
-          <Reveal>
-            <h2 className={styles.ctaTitle}>Let’s do it live together</h2>
-            <h2 className={styles.ctaSub}>
-              Tell us a bit about your project and we’ll be in touch with you shortly.
-            </h2>
-            <a className={styles.ctaButton} href="https://impressiv.com.sa/contact/">
-              Message us!
-            </a>
-          </Reveal>
+        {/* 4 · in the crowd */}
+        <section className={v.station} data-station="crowd" aria-labelledby="test-title">
+          <div className={cn(v.sticky, v.center, v.bottom)}>
+            <Reveal className={cn(v.panel, v.panelWide)}>
+              <p id="test-title" className={v.eyebrow}>
+                Testimonial · Riyadh International Book Fair 2019
+              </p>
+              <p className={v.quote}>
+                “We planned a good event and we were delivered an incredible experience, that left everyone
+                speechless. Our collaboration with ImpressIV went on very smoothly and it was a great pleasure to
+                interact with the team.”
+              </p>
+            </Reveal>
+          </div>
+        </section>
+
+        {/* 5 · on stage */}
+        <section className={v.station} data-station="stage" aria-labelledby="cta-title">
+          <div className={cn(v.sticky, v.center, v.bottom)}>
+            <Reveal variant="rise" className={cn(v.panel, v.bare)}>
+              <h2 id="cta-title" className={v.ctaTitle}>
+                Let’s do it live together
+              </h2>
+              <p className={v.heroSub}>Tell us a bit about your project and we’ll be in touch with you shortly.</p>
+              <a className={v.buttonGhost} href="https://impressiv.com.sa/contact/">
+                Message us!
+              </a>
+            </Reveal>
+          </div>
         </section>
       </main>
 
@@ -99,30 +139,37 @@ export function ImpressivHome() {
           </div>
           <div className={styles.footerCol}>
             <h3 className={styles.footerLabel}>Office</h3>
-            <h3 className={styles.footerBody}>
+            <p className={styles.footerBody}>
               3896 Prince Muqrin Ibn Abdulaziz
               <br />
               7553 Al Nuzha District, 12474 Riyadh,
               <br />
               Kingdom of Saudi Arabia
-            </h3>
+            </p>
           </div>
           <div className={styles.footerCol}>
             <h3 className={styles.footerLabel}>Get in touch with us</h3>
-            <h3 className={`${styles.footerBody} ${styles.footerMont}`}>
+            <p className={cn(styles.footerBody, styles.footerMont)}>
               <a href="mailto:hello@impressiv.com.sa">hello@impressiv.com.sa</a>
               <br />
               <a href="tel:0118123338">0118123338</a>
               <br />
               <a href="tel:0566061682">0566061682</a>
-            </h3>
+            </p>
           </div>
         </div>
         <div className={styles.footerBottom}>
-          <h3 className={styles.copy}>© 2011 - 2026 ImpressIV. All rights reserved.</h3>
+          <p className={styles.copy}>© 2011 - 2026 ImpressIV. All rights reserved.</p>
           <div className={styles.socials}>
             {SOCIALS.map((s) => (
-              <a key={s.label} className={styles.social} href={s.href} target="_blank" rel="noopener noreferrer" aria-label={s.label}>
+              <a
+                key={s.label}
+                className={styles.social}
+                href={s.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={s.label}
+              >
                 <span aria-hidden="true">{s.glyph}</span>
               </a>
             ))}

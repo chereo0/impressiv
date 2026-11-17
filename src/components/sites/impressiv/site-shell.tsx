@@ -37,16 +37,12 @@ function CloseIcon() {
   );
 }
 
-export function SiteShell({ children }: { children: ReactNode }) {
+export function SiteShell({ children, scene }: { children: ReactNode; scene?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [solid, setSolid] = useState(false);
 
   useEffect(() => {
-    // stay transparent over the 3D wall; go solid once it has scrolled away
-    const onScroll = () => {
-      const wall = document.getElementById("iv-wall");
-      setSolid(wall ? wall.getBoundingClientRect().bottom < 80 : window.scrollY > 300);
-    };
+    const onScroll = () => setSolid(window.scrollY > 300);
     onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
@@ -66,6 +62,8 @@ export function SiteShell({ children }: { children: ReactNode }) {
 
   return (
     <div className={styles.root}>
+      {/* rendered outside the page wrapper so the menu's push transform doesn't move it */}
+      {scene}
       <header className={cn(styles.header, solid && styles.headerSolid, open && styles.pushed)}>
           <a href="https://impressiv.com.sa/" aria-label="ImpressIV home">
             <Image
