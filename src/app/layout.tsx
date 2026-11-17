@@ -1,20 +1,22 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Heebo, Lato, Montserrat, Raleway, Roboto, Roboto_Slab, VT323 } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const heebo = Heebo({ variable: "--font-heebo", subsets: ["latin"], weight: ["400", "600", "700"] });
+const lato = Lato({ variable: "--font-lato", subsets: ["latin"], weight: ["400", "700"] });
+const montserrat = Montserrat({
+  variable: "--font-montserrat",
   subsets: ["latin"],
+  weight: ["300", "400", "700"],
 });
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+const raleway = Raleway({ variable: "--font-raleway", subsets: ["latin"], weight: ["300", "400", "700"] });
+const roboto = Roboto({ variable: "--font-roboto", subsets: ["latin"], weight: ["500", "600", "700"] });
+const robotoSlab = Roboto_Slab({ variable: "--font-roboto-slab", subsets: ["latin"], weight: ["400"] });
+const vt323 = VT323({ variable: "--font-vt323", subsets: ["latin"], weight: "400" });
 
 export const metadata: Metadata = {
-  title: "Website Clone",
-  description: "Pixel-perfect website clone",
+  title: "ImpressIV – We do it live",
+  description: "ImpressIV – live event production, exhibitions and shows in Riyadh.",
 };
 
 export default function RootLayout({
@@ -25,9 +27,9 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={[heebo, lato, montserrat, raleway, roboto, robotoSlab, vt323].map((f) => f.variable).join(" ")}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body>{children}</body>
     </html>
   );
 }

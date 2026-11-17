@@ -1,0 +1,33 @@
+.reveal {
+  opacity: 0;
+  transform-origin: 50% 100%;
+  transition:
+    opacity 0.9s ease,
+    transform 1.1s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform, opacity;
+}
+
+.tilt {
+  transform: perspective(1100px) rotateX(24deg) translate3d(0, 80px, -60px);
+}
+
+.rise {
+  transform: perspective(1100px) translate3d(0, 70px, -120px) scale(0.96);
+}
+
+.swing {
+  transform-origin: 0% 50%;
+  transform: perspective(1100px) rotateY(-28deg) translate3d(-40px, 0, -80px);
+}
+
+.shown {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    transform: none;
+    transition: opacity 0.4s ease;
+  }
+}
