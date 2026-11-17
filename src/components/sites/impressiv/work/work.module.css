@@ -1,0 +1,417 @@
+.main {
+  position: relative;
+  z-index: 1;
+  background: #050507;
+}
+
+/* ---------- 3D corridor intro ---------- */
+.hero {
+  position: relative;
+  height: 320vh;
+}
+
+.heroStage {
+  --p: 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100svh;
+  overflow: hidden;
+  background: #040406;
+}
+
+.heroFallback {
+  background: #000 url("/sites/impressiv/work/zain-participation-in-leap-2024.jpg") center / cover no-repeat;
+}
+
+.heroFallback .heroCanvas {
+  display: none;
+}
+
+.heroCanvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.heroCurtain {
+  position: absolute;
+  inset: 0;
+  background: #040406;
+  transition: opacity 1.2s ease;
+  pointer-events: none;
+}
+
+.heroCurtainUp {
+  opacity: 0;
+}
+
+.heroCopy {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  padding: 0 6vw;
+  text-align: center;
+  transform: translateY(calc(-50% - var(--p) * 220px)) scale(calc(1 - var(--p) * 0.25));
+  opacity: clamp(0, calc(1 - var(--p) * 3.2), 1);
+  pointer-events: none;
+}
+
+.eyebrow {
+  margin: 0 0 18px;
+  font-family: var(--lato);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--iv-gold);
+}
+
+.heroTitle {
+  margin: 0;
+  font-family: var(--montserrat);
+  font-size: clamp(64px, 12vw, 190px);
+  font-weight: 700;
+  line-height: 0.92;
+  letter-spacing: -0.02em;
+  color: #fff;
+  text-shadow: 0 0 60px rgba(255, 181, 0, 0.25);
+}
+
+.heroSub {
+  margin: 26px auto 0;
+  max-width: 620px;
+  font-family: var(--raleway);
+  font-size: clamp(16px, 1.5vw, 20px);
+  font-weight: 300;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 1px 14px rgba(0, 0, 0, 0.9);
+}
+
+.hint {
+  margin-top: 40px;
+  font-family: var(--lato);
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: rgba(255, 255, 255, 0.65);
+  animation: nudge 2s ease-in-out infinite;
+}
+
+.heroOutro {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 10vh;
+  display: flex;
+  justify-content: center;
+  opacity: clamp(0, calc((var(--p) - 0.78) * 6), 1);
+  transform: translateY(calc((1 - clamp(0, (var(--p) - 0.78) * 6, 1)) * 30px));
+}
+
+.outroLink {
+  padding: 15px 30px;
+  font-family: var(--raleway);
+  font-size: 16px;
+  font-weight: 700;
+  color: #000;
+  background: var(--iv-yellow);
+  border: 1px solid var(--iv-yellow);
+  transition: color 0.3s;
+}
+
+.outroLink:hover {
+  color: #fff;
+}
+
+/* ---------- archive ---------- */
+.archive {
+  position: relative;
+  padding: 120px 6vw 140px;
+  background: radial-gradient(ellipse at 50% 0%, rgba(255, 181, 0, 0.08), transparent 60%), #050507;
+}
+
+.archiveHead {
+  position: sticky;
+  top: 76px;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px 30px;
+  margin: 0 -6vw 40px;
+  padding: 18px 6vw;
+  background: rgba(5, 5, 7, 0.78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.archiveTitle {
+  margin: 0;
+  font-family: var(--montserrat);
+  font-size: clamp(26px, 2.6vw, 38px);
+  font-weight: 700;
+  color: #fff;
+}
+
+.archiveTitle span {
+  margin-left: 10px;
+  font-size: 0.55em;
+  font-weight: 400;
+  color: var(--iv-yellow);
+  vertical-align: super;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter {
+  padding: 10px 16px;
+  font-family: var(--lato);
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.75);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 0.25s, background-color 0.25s, border-color 0.25s;
+}
+
+.filter sup {
+  margin-left: 2px;
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.filter:hover,
+.filter:focus-visible {
+  color: #fff;
+  border-color: rgba(255, 181, 0, 0.6);
+}
+
+.filterOn {
+  color: #000;
+  background: var(--iv-yellow);
+  border-color: var(--iv-yellow);
+}
+
+.filterOn:hover,
+.filterOn:focus-visible {
+  color: #000;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 22px;
+  perspective: 1400px;
+}
+
+/* every seventh card is a wide feature, for rhythm */
+.grid > .card:nth-child(7n + 1) {
+  grid-column: span 2;
+}
+
+.card {
+  --rx: 0deg;
+  --ry: 0deg;
+  --mx: 50%;
+  --my: 50%;
+  display: block;
+  opacity: 0;
+  transform: perspective(1200px) translate3d(0, 90px, -120px) rotateX(28deg);
+  transform-origin: 50% 100%;
+  transition:
+    opacity 0.8s ease,
+    transform 1.1s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cardIn {
+  opacity: 1;
+  transform: none;
+}
+
+.cardInner {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  background: #111;
+  transform: perspective(900px) rotateX(var(--rx)) rotateY(var(--ry));
+  transition: transform 0.35s ease, box-shadow 0.35s ease;
+  box-shadow: 0 20px 40px -20px rgba(0, 0, 0, 0.8);
+}
+
+.grid > .card:nth-child(7n + 1) .cardInner {
+  aspect-ratio: auto;
+  height: 100%;
+  min-height: 100%;
+}
+
+.card:hover .cardInner,
+.card:focus-visible .cardInner {
+  box-shadow:
+    0 0 0 1px var(--iv-yellow),
+    0 30px 60px -20px rgba(255, 181, 0, 0.35);
+}
+
+.cardImage {
+  object-fit: cover;
+  transform: scale(1.04);
+  transition: transform 0.9s cubic-bezier(0.16, 1, 0.3, 1), filter 0.6s ease;
+  filter: saturate(0.85) brightness(0.85);
+}
+
+.card:hover .cardImage,
+.card:focus-visible .cardImage {
+  transform: scale(1.12);
+  filter: saturate(1.05) brightness(1);
+}
+
+.cardShade {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.25) 45%, transparent 70%);
+}
+
+.cardGlare {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, 0.18), transparent 45%);
+  opacity: 0;
+  transition: opacity 0.3s;
+  mix-blend-mode: screen;
+}
+
+.card:hover .cardGlare {
+  opacity: 1;
+}
+
+.cardNo {
+  position: absolute;
+  top: 16px;
+  left: 18px;
+  font-family: var(--montserrat);
+  font-size: 13px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 1px;
+}
+
+.cardText {
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transform: translateZ(40px);
+}
+
+.cardCat {
+  font-family: var(--lato);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--iv-gold);
+}
+
+.cardTitle {
+  font-family: var(--heebo);
+  font-size: clamp(19px, 1.5vw, 24px);
+  font-weight: 600;
+  line-height: 1.2;
+  color: #fff;
+}
+
+.grid > .card:nth-child(7n + 1) .cardTitle {
+  font-size: clamp(24px, 2.3vw, 36px);
+}
+
+.cardMeta {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--raleway);
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.cardMeta i {
+  font-style: normal;
+  color: var(--iv-yellow);
+  transition: transform 0.3s;
+}
+
+.card:hover .cardMeta i {
+  transform: translateX(6px);
+}
+
+@keyframes nudge {
+  50% {
+    transform: translateY(6px);
+  }
+}
+
+@media (max-width: 1100px) {
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 767px) {
+  .hero {
+    height: 260vh;
+  }
+  .archive {
+    padding: 70px 16px 90px;
+  }
+  .archiveHead {
+    top: 66px;
+    margin: 0 -16px 28px;
+    padding: 14px 16px;
+  }
+  .filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: 100%;
+    scrollbar-width: none;
+  }
+  .filter {
+    white-space: nowrap;
+  }
+  .grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .grid > .card:nth-child(7n + 1) {
+    grid-column: auto;
+  }
+  .grid > .card:nth-child(7n + 1) .cardInner {
+    aspect-ratio: 16 / 10;
+    height: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    transform: none;
+    transition: opacity 0.4s ease;
+  }
+  .cardInner {
+    transform: none;
+  }
+  .hint {
+    animation: none;
+  }
+}

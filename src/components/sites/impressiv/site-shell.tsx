@@ -1,12 +1,13 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import styles from "./impressiv.module.css";
 
 const NAV = [
-  { label: "Work", href: "https://impressiv.com.sa/work/" },
+  { label: "Work", href: "/work" },
   { label: "About", href: "https://impressiv.com.sa/about/" },
   { label: "Approach", href: "https://impressiv.com.sa/approach/" },
   { label: "Reels", href: "https://impressiv.com.sa/reel/" },
@@ -65,7 +66,7 @@ export function SiteShell({ children, scene }: { children: ReactNode; scene?: Re
       {/* rendered outside the page wrapper so the menu's push transform doesn't move it */}
       {scene}
       <header className={cn(styles.header, solid && styles.headerSolid, open && styles.pushed)}>
-          <a href="https://impressiv.com.sa/" aria-label="ImpressIV home">
+          <Link href="/" aria-label="ImpressIV home">
             <Image
               className={styles.headerLogo}
               src="/sites/impressiv/logo-sm.png"
@@ -74,7 +75,7 @@ export function SiteShell({ children, scene }: { children: ReactNode; scene?: Re
               height={34}
               priority
             />
-          </a>
+          </Link>
           <button
             type="button"
             className={styles.burger}
@@ -103,11 +104,17 @@ export function SiteShell({ children, scene }: { children: ReactNode; scene?: Re
           <CloseIcon />
         </button>
         <nav className={styles.offcanvasNav} aria-label="Main">
-          {NAV.map((item) => (
-            <a key={item.label} href={item.href}>
-              {item.label}
-            </a>
-          ))}
+          {NAV.map((item) =>
+            item.href.startsWith("/") ? (
+              <Link key={item.label} href={item.href} onClick={() => setOpen(false)}>
+                {item.label}
+              </Link>
+            ) : (
+              <a key={item.label} href={item.href}>
+                {item.label}
+              </a>
+            ),
+          )}
         </nav>
         <Image
           className={styles.offcanvasLogo}

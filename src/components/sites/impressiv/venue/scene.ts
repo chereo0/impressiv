@@ -1,10 +1,12 @@
 import * as THREE from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { PROJECTS, STATIONS, STILLS } from "./content";
+import { FINALE, PROJECTS, SCREEN_SLOTS, SCREEN_Y, STATIONS, STILLS, WALL_X, WORK_START } from "./content";
 
 export interface VenueOptions {
   canvas: HTMLCanvasElement;
@@ -18,7 +20,7 @@ export interface VenueOptions {
 }
 
 export interface VenueHandle {
-  /** Fractional station index: 0 = entrance … 5 = stage. */
+  /** Fractional station index into STATIONS. */
   setStation: (s: number) => void;
   setActive: (active: boolean) => void;
   dispose: () => void;
@@ -28,6 +30,8 @@ const YELLOW = new THREE.Color("#ffb500");
 const WHITE = new THREE.Color("#fff4e0");
 const BLUE = new THREE.Color("#3d6bff");
 const MAGENTA = new THREE.Color("#ff3b8d");
+const CYAN = new THREE.Color("#3ff2ff");
+const FINALE_RIM = new THREE.Color("#ff8a3d");
 
 const clamp01 = (t: number) => Math.min(1, Math.max(0, t));
 const smooth = (a: number, b: number, t: number) => {
@@ -53,12 +57,13 @@ const LED_VERT = /* glsl */ `
 const LED_FRAG = /* glsl */ `
   uniform sampler2D mapA;
   uniform sampler2D mapB;
-  uniform vec4 fitA;   // xy scale, zw offset
+  uniform vec4 fitA;
   uniform vec4 fitB;
   uniform float mixB;
   uniform vec2 cells;
   uniform float brightness;
   uniform float hover;
+  uniform float time;
   varying vec2 vUv;
   void main() {
     vec2 cell = floor(vUv * cells);
@@ -67,8 +72,10 @@ const LED_FRAG = /* glsl */ `
     float diode = smoothstep(0.52, 0.18, length(f));
     vec3 a = texture2D(mapA, cuv * fitA.xy + fitA.zw).rgb;
     vec3 b = texture2D(mapB, cuv * fitB.xy + fitB.zw).rgb;
-    vec3 col = mix(a, b, mixB) * brightness * (1.0 + hover * 0.6);
-    col *= mix(0.28, 1.15, diode);
+    vec3 col = mix(a, b, mixB) * brightness * (1.0 + hover * 0.3);
+    // a slow refresh band rolling down the panel
+    col *= 0.94 + 0.06 * smoothstep(0.0, 0.08, abs(fract(vUv.y + time * 0.12) - 0.5));
+    col *= mix(0.26, 1.15, diode);
     gl_FragColor = vec4(col, 1.0);
   }
 `;
@@ -86,20 +93,49 @@ const BEAM_VERT = /* glsl */ `
   }
 `;
 
-/** Volumetric-looking light beam: bright at the lamp, fading with distance and at the edges. */
 const BEAM_FRAG = /* glsl */ `
   uniform vec3 color;
   uniform float intensity;
+  uniform float time;
   varying vec2 vUv;
   varying vec3 vNormalV;
   varying vec3 vViewV;
   void main() {
-    float along = pow(vUv.y, 1.6);
-    float edge = pow(abs(dot(vNormalV, vViewV)), 1.4);
-    float a = along * edge * intensity;
+    float along = pow(vUv.y, 1.5);
+    float edge = pow(abs(dot(vNormalV, vViewV)), 1.3);
+    // drifting haze inside the beam
+    float haze = 0.75 + 0.25 * sin(vUv.y * 18.0 - time * 1.7 + vUv.x * 30.0);
+    float a = along * edge * intensity * haze;
     gl_FragColor = vec4(color * a, a);
   }
 `;
+
+/** Film grain + vignette, applied after tone mapping. */
+const GRAIN_SHADER = {
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    time: { value: 0 },
+    amount: { value: 0.045 },
+    vignette: { value: 0.42 },
+  },
+  vertexShader: LED_VERT,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float time;
+    uniform float amount;
+    uniform float vignette;
+    varying vec2 vUv;
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      float n = hash(vUv * 1000.0 + fract(time) * 100.0) - 0.5;
+      c.rgb += n * amount;
+      float d = distance(vUv, vec2(0.5));
+      c.rgb *= 1.0 - vignette * smoothstep(0.35, 0.85, d);
+      gl_FragColor = c;
+    }
+  `,
+};
 
 /* ------------------------------------------------------------- textures */
 
@@ -114,6 +150,21 @@ function canvasTexture(draw: (ctx: CanvasRenderingContext2D, w: number, h: numbe
   return t;
 }
 
+function radialTexture() {
+  return canvasTexture(
+    (ctx, w, h) => {
+      const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, w / 2);
+      g.addColorStop(0, "rgba(255,255,255,1)");
+      g.addColorStop(0.35, "rgba(255,255,255,0.45)");
+      g.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+    },
+    128,
+    128,
+  );
+}
+
 function fitCover(target: THREE.Vector4, texAspect: number, planeAspect: number) {
   if (texAspect > planeAspect) {
     const s = planeAspect / texAspect;
@@ -126,7 +177,6 @@ function fitCover(target: THREE.Vector4, texAspect: number, planeAspect: number)
 
 /* ------------------------------------------------------------- geometry */
 
-/** A straight square box truss of the given length along +X, centred on the origin. */
 function trussGeometry(length: number, size = 0.42, r = 0.03) {
   const parts: THREE.BufferGeometry[] = [];
   const h = size / 2;
@@ -142,21 +192,18 @@ function trussGeometry(length: number, size = 0.42, r = 0.03) {
     g.translate(0, y, z);
     parts.push(g);
   }
-  const step = size;
-  const n = Math.floor(length / step);
-  const dir = new THREE.Vector3();
-  const mid = new THREE.Vector3();
+  const n = Math.floor(length / size);
   const up = new THREE.Vector3(0, 1, 0);
   for (let i = 0; i < n; i++) {
-    const x0 = -length / 2 + i * step;
+    const x0 = -length / 2 + i * size;
     for (let k = 0; k < 4; k++) {
       const a = corners[k];
       const b = corners[(k + 1) % 4];
       const p0 = new THREE.Vector3(x0, a[0], a[1]);
-      const p1 = new THREE.Vector3(x0 + step, b[0], b[1]);
-      dir.subVectors(p1, p0);
+      const p1 = new THREE.Vector3(x0 + size, b[0], b[1]);
+      const dir = p1.clone().sub(p0);
       const len = dir.length();
-      mid.addVectors(p0, p1).multiplyScalar(0.5);
+      const mid = p0.clone().add(p1).multiplyScalar(0.5);
       const g = new THREE.CylinderGeometry(r * 0.6, r * 0.6, len, 5, 1);
       g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(up, dir.normalize()));
       g.translate(mid.x, mid.y, mid.z);
@@ -166,20 +213,29 @@ function trussGeometry(length: number, size = 0.42, r = 0.03) {
   return mergeGeometries(parts)!;
 }
 
-function personGeometry() {
+function personGeometry(armsUp: boolean) {
   const body = new THREE.CapsuleGeometry(0.21, 0.78, 3, 8);
   body.translate(0, 0.62, 0);
   const head = new THREE.SphereGeometry(0.13, 10, 8);
   head.translate(0, 1.38, 0);
-  return mergeGeometries([body, head])!;
+  const parts = [body, head];
+  if (armsUp) {
+    for (const side of [-1, 1]) {
+      const arm = new THREE.CapsuleGeometry(0.055, 0.62, 2, 6);
+      arm.rotateZ(side * -0.38);
+      arm.translate(side * 0.3, 1.55, 0);
+      parts.push(arm);
+    }
+  }
+  return mergeGeometries(parts)!;
 }
 
 /* ------------------------------------------------------------- the venue */
 
 interface MovingHead {
   pivot: THREE.Group;
-  beam: THREE.Mesh;
-  uniforms: { color: { value: THREE.Color }; intensity: { value: number } };
+  uniforms: { color: { value: THREE.Color }; intensity: { value: number }; time: { value: number } };
+  pool: THREE.Mesh;
   phase: number;
   speed: number;
   pos: THREE.Vector3;
@@ -196,6 +252,7 @@ interface LedPanel {
     cells: { value: THREE.Vector2 };
     brightness: { value: number };
     hover: { value: number };
+    time: { value: number };
   };
   aspect: number;
 }
@@ -210,19 +267,30 @@ export function createVenue(opts: VenueOptions): VenueHandle {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#040406");
-  scene.fog = new THREE.FogExp2("#05060a", small ? 0.03 : 0.026);
+  scene.fog = new THREE.FogExp2("#05060a", small ? 0.028 : 0.024);
 
-  const camera = new THREE.PerspectiveCamera(small ? 62 : 50, 1, 0.1, 140);
+  // soft reflections on metal and the glossy floor
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environment = envTex;
+  scene.environmentIntensity = 0.18;
 
-  // post-processing: bloom makes the LEDs and beams glow (desktop only)
+  const baseFov = small ? 62 : 50;
+  const camera = new THREE.PerspectiveCamera(baseFov, 1, 0.1, 140);
+
+  const sharedTime = { value: 0 };
+
   let composer: EffectComposer | null = null;
   let bloom: UnrealBloomPass | null = null;
+  let grain: ShaderPass | null = null;
   if (!small) {
     composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
-    bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.85, 0.55, 0.32);
+    bloom = new UnrealBloomPass(new THREE.Vector2(512, 512), 0.8, 0.55, 0.42);
     composer.addPass(bloom);
     composer.addPass(new OutputPass());
+    grain = new ShaderPass(GRAIN_SHADER);
+    composer.addPass(grain);
   }
 
   /* ---------- loading ---------- */
@@ -239,8 +307,8 @@ export function createVenue(opts: VenueOptions): VenueHandle {
     if (waiters) return void waiters.push(cb);
     pending.set(src, [cb]);
     const tex = loader.load(src, (t) => {
-      const img = t.image as HTMLImageElement;
-      const entry = { tex: t, aspect: img.width / img.height };
+      const image = t.image as HTMLImageElement;
+      const entry = { tex: t, aspect: image.width / image.height };
       textures.set(src, entry);
       pending.get(src)!.forEach((w) => w(t, entry.aspect));
       pending.delete(src);
@@ -253,7 +321,7 @@ export function createVenue(opts: VenueOptions): VenueHandle {
   videoTex.colorSpace = THREE.SRGBColorSpace;
   let videoAspect = 16 / 9;
 
-  const owned: { dispose: () => void }[] = [];
+  const owned: { dispose: () => void }[] = [envTex, pmrem];
   const own = <T extends { dispose: () => void }>(x: T) => {
     owned.push(x);
     return x;
@@ -261,22 +329,40 @@ export function createVenue(opts: VenueOptions): VenueHandle {
 
   /* ---------- materials ---------- */
   const wallMat = own(new THREE.MeshStandardMaterial({ color: "#0c0c10", roughness: 0.92 }));
-  const floorMat = own(new THREE.MeshStandardMaterial({ color: "#0b0b0e", roughness: 0.42, metalness: 0.45 }));
-  const stageMat = own(new THREE.MeshStandardMaterial({ color: "#101012", roughness: 0.3, metalness: 0.5 }));
-  const metalMat = own(new THREE.MeshStandardMaterial({ color: "#8a8d92", roughness: 0.35, metalness: 0.85 }));
-  const blackMat = own(new THREE.MeshStandardMaterial({ color: "#070708", roughness: 0.6, metalness: 0.2 }));
-  const crowdMat = own(new THREE.MeshStandardMaterial({ color: "#121216", roughness: 0.85 }));
+  const stageMat = own(new THREE.MeshStandardMaterial({ color: "#101012", roughness: 0.25, metalness: 0.6 }));
+  const metalMat = own(new THREE.MeshStandardMaterial({ color: "#9a9da2", roughness: 0.3, metalness: 0.9 }));
+  const blackMat = own(new THREE.MeshStandardMaterial({ color: "#070708", roughness: 0.55, metalness: 0.3 }));
   const yellowGlow = own(new THREE.MeshBasicMaterial({ color: YELLOW }));
+  const glowTex = own(radialTexture());
+
+  // crowd: dark bodies with a rim of stage light around the silhouettes
+  const rimColor = { value: new THREE.Color("#6f8dff") };
+  const rimStrength = { value: 1.2 };
+  const crowdMat = own(new THREE.MeshStandardMaterial({ color: "#0d0d11", roughness: 0.8 }));
+  crowdMat.onBeforeCompile = (shader) => {
+    shader.uniforms.rimColor = rimColor;
+    shader.uniforms.rimStrength = rimStrength;
+    shader.fragmentShader =
+      "uniform vec3 rimColor;\nuniform float rimStrength;\n" +
+      shader.fragmentShader.replace(
+        "#include <emissivemap_fragment>",
+        `#include <emissivemap_fragment>
+         float rim = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 2.6);
+         totalEmissiveRadiance += rimColor * rim * rimStrength;`,
+      );
+  };
 
   /* ---------- lights ---------- */
-  scene.add(new THREE.HemisphereLight("#2a3048", "#050505", 0.5));
-  const stageWash = new THREE.PointLight("#5b7cff", 70, 30, 1.6);
+  scene.add(new THREE.HemisphereLight("#2a3048", "#050505", 0.45));
+  const stageWash = new THREE.PointLight("#5b7cff", 80, 32, 1.6);
   stageWash.position.set(0, 7, -14);
-  const warm = new THREE.PointLight("#ffb347", 50, 28, 1.6);
+  const warm = new THREE.PointLight("#ffb347", 55, 28, 1.6);
   warm.position.set(0, 3, -12);
   const entranceLight = new THREE.PointLight("#ffd27a", 40, 18, 1.6);
   entranceLight.position.set(0, 7, 18);
-  scene.add(stageWash, warm, entranceLight);
+  const galleryLight = new THREE.PointLight("#fff1d6", 0, 26, 1.6);
+  galleryLight.position.set(0, 9, 0);
+  scene.add(stageWash, warm, entranceLight, galleryLight);
 
   /* ---------- hall ---------- */
   const add = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number) => {
@@ -285,36 +371,52 @@ export function createVenue(opts: VenueOptions): VenueHandle {
     scene.add(m);
     return m;
   };
-  const floor = add(new THREE.PlaneGeometry(60, 90), floorMat, 0, 0, 0);
-  floor.rotation.x = -Math.PI / 2;
-  add(new THREE.BoxGeometry(0.5, 16, 40), wallMat, -18.25, 8, -5); // left wall
-  add(new THREE.BoxGeometry(0.5, 16, 40), wallMat, 18.25, 8, -5); // right wall
-  add(new THREE.BoxGeometry(37, 16, 0.5), wallMat, 0, 8, -25.25); // back wall
-  add(new THREE.BoxGeometry(13, 16, 0.5), wallMat, -11.5, 8, 14.25); // front wall, left of door
-  add(new THREE.BoxGeometry(13, 16, 0.5), wallMat, 11.5, 8, 14.25); // front wall, right
-  add(new THREE.BoxGeometry(10, 6.5, 0.5), wallMat, 0, 12.75, 14.25); // above the door
 
-  // entrance: arch frame, lit sign, carpet
-  add(new THREE.BoxGeometry(0.6, 9.5, 0.9), metalMat, -5.2, 4.75, 14.4);
-  add(new THREE.BoxGeometry(0.6, 9.5, 0.9), metalMat, 5.2, 4.75, 14.4);
-  add(new THREE.BoxGeometry(11, 0.6, 0.9), metalMat, 0, 9.8, 14.4);
-  const sign = canvasTexture((ctx, w, h) => {
-    ctx.fillStyle = "#050505";
-    ctx.fillRect(0, 0, w, h);
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillStyle = "#ffffff";
-    ctx.font = `700 210px ${cssFont("--font-montserrat", "sans-serif")}`;
-    ctx.fillText("IMPRESS", w / 2 - 95, h / 2 - 30);
-    ctx.fillStyle = "#ffb500";
-    ctx.fillText("IV", w / 2 + 380, h / 2 - 30);
-    ctx.font = `400 64px ${cssFont("--font-lato", "sans-serif")}`;
-    ctx.fillStyle = "#ffb500";
-    ctx.fillText("W E   D O   I T   L I V E", w / 2, h / 2 + 150);
-  }, 1600, 640);
-  own(sign);
-  const signMesh = add(new THREE.PlaneGeometry(8.5, 3.4), new THREE.MeshBasicMaterial({ map: sign, toneMapped: false }), 0, 12.3, 14.55);
-  own(signMesh.material as THREE.Material);
+  // glossy polished floor (picks up the environment and the light pools)
+  const floor = add(
+    new THREE.PlaneGeometry(60, 90),
+    own(new THREE.MeshStandardMaterial({ color: "#0a0a0d", roughness: 0.28, metalness: 0.55 })),
+    0,
+    0,
+    0,
+  );
+  floor.rotation.x = -Math.PI / 2;
+
+  add(new THREE.BoxGeometry(0.5, 16, 40), wallMat, -18.25, 8, -5);
+  add(new THREE.BoxGeometry(0.5, 16, 40), wallMat, 18.25, 8, -5);
+  add(new THREE.BoxGeometry(37, 16, 0.5), wallMat, 0, 8, -25.25);
+  // front wall with a big doorway (the camera flies through it)
+  add(new THREE.BoxGeometry(11, 16, 0.5), wallMat, -12.5, 8, 14.25);
+  add(new THREE.BoxGeometry(11, 16, 0.5), wallMat, 12.5, 8, 14.25);
+  add(new THREE.BoxGeometry(14, 3.4, 0.5), wallMat, 0, 14.3, 14.25);
+
+  // entrance arch
+  add(new THREE.BoxGeometry(0.6, 12.6, 0.9), metalMat, -7.2, 6.3, 14.4);
+  add(new THREE.BoxGeometry(0.6, 12.6, 0.9), metalMat, 7.2, 6.3, 14.4);
+  add(new THREE.BoxGeometry(15, 0.6, 0.9), metalMat, 0, 12.6, 14.4);
+  const sign = own(
+    canvasTexture(
+      (ctx, w, h) => {
+        ctx.fillStyle = "#050505";
+        ctx.fillRect(0, 0, w, h);
+        ctx.textBaseline = "middle";
+        ctx.font = `700 210px ${cssFont("--font-montserrat", "sans-serif")}`;
+        const a = ctx.measureText("IMPRESS").width;
+        const b = ctx.measureText("IV").width;
+        const x = (w - a - b) / 2;
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText("IMPRESS", x, h / 2 - 30);
+        ctx.fillStyle = "#ffb500";
+        ctx.fillText("IV", x + a, h / 2 - 30);
+        ctx.textAlign = "center";
+        ctx.font = `400 64px ${cssFont("--font-lato", "sans-serif")}`;
+        ctx.fillText("W E   D O   I T   L I V E", w / 2, h / 2 + 150);
+      },
+      1600,
+      640,
+    ),
+  );
+  add(new THREE.PlaneGeometry(7, 2.8), own(new THREE.MeshBasicMaterial({ map: sign, toneMapped: false })), 0, 14.4, 14.55);
   const carpet = add(new THREE.PlaneGeometry(4, 22), own(new THREE.MeshStandardMaterial({ color: "#16161a", roughness: 0.9 })), 0, 0.01, 25);
   carpet.rotation.x = -Math.PI / 2;
   for (const side of [-1, 1]) {
@@ -322,10 +424,7 @@ export function createVenue(opts: VenueOptions): VenueHandle {
     strip.rotation.x = -Math.PI / 2;
   }
 
-  /* ---------- stage ---------- */
-  add(new THREE.BoxGeometry(22, 1.2, 9.5), stageMat, 0, 0.6, -20);
-  add(new THREE.BoxGeometry(22, 0.05, 0.05), yellowGlow, 0, 1.2, -15.25); // lit stage lip
-
+  /* ---------- LED panels ---------- */
   const ledPanels: LedPanel[] = [];
   const makeLed = (w: number, h: number, cellsX: number, map: THREE.Texture | null) => {
     const uniforms: LedPanel["uniforms"] = {
@@ -337,6 +436,7 @@ export function createVenue(opts: VenueOptions): VenueHandle {
       cells: { value: new THREE.Vector2(cellsX, Math.round((cellsX * h) / w)) },
       brightness: { value: 1.25 },
       hover: { value: 0 },
+      time: sharedTime,
     };
     const mat = own(new THREE.ShaderMaterial({ uniforms, vertexShader: LED_VERT, fragmentShader: LED_FRAG }));
     const mesh = new THREE.Mesh(own(new THREE.PlaneGeometry(w, h)), mat);
@@ -345,7 +445,10 @@ export function createVenue(opts: VenueOptions): VenueHandle {
     return panel;
   };
 
-  // main LED wall: the showreel, then the IMPRESSIV ident for the finale
+  /* ---------- stage ---------- */
+  add(new THREE.BoxGeometry(22, 1.2, 9.5), stageMat, 0, 0.6, -20);
+  add(new THREE.BoxGeometry(22, 0.05, 0.05), yellowGlow, 0, 1.2, -15.25);
+
   const finale = own(
     canvasTexture((ctx, w, h) => {
       ctx.fillStyle = "#000";
@@ -371,9 +474,40 @@ export function createVenue(opts: VenueOptions): VenueHandle {
   scene.add(mainLed.mesh);
   add(new THREE.BoxGeometry(16.6, 8.6, 0.4), blackMat, 0, 6.2, -23.85);
 
+  // a faint, fading reflection of the LED wall on the floor in front of the stage
+  const floorReflection = add(
+    new THREE.PlaneGeometry(16, 9),
+    own(
+      new THREE.ShaderMaterial({
+        uniforms: { map: { value: videoTex }, fit: mainLed.uniforms.fitA, strength: { value: 0.22 } },
+        vertexShader: LED_VERT,
+        fragmentShader: /* glsl */ `
+          uniform sampler2D map;
+          uniform vec4 fit;
+          uniform float strength;
+          varying vec2 vUv;
+          void main() {
+            vec2 uv = vec2(vUv.x, 1.0 - vUv.y) * fit.xy + fit.zw;
+            vec3 c = texture2D(map, uv).rgb;
+            float fade = pow(vUv.y, 2.2) * smoothstep(0.0, 0.15, vUv.x) * smoothstep(1.0, 0.85, vUv.x);
+            gl_FragColor = vec4(c * fade * strength, 1.0);
+          }
+        `,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    ),
+    0,
+    0.02,
+    -10.6,
+  );
+  floorReflection.rotation.x = -Math.PI / 2;
+
   const towers: LedPanel[] = [];
   for (const side of [-1, 1]) {
     const tower = makeLed(3.2, 7, 48, null);
+    tower.uniforms.brightness.value = 0.95;
     tower.mesh.position.set(side * 10.6, 4.7, -21.2);
     tower.mesh.rotation.y = -side * 0.38;
     scene.add(tower.mesh);
@@ -382,7 +516,6 @@ export function createVenue(opts: VenueOptions): VenueHandle {
     towers.push(tower);
   }
 
-  // line-array speakers hanging beside the stage
   for (const side of [-1, 1]) {
     for (let i = 0; i < 6; i++) {
       const box = add(new THREE.BoxGeometry(1.3, 0.42, 0.8), blackMat, side * 13.4, 10 - i * 0.44, -15.5);
@@ -390,7 +523,6 @@ export function createVenue(opts: VenueOptions): VenueHandle {
     }
   }
 
-  // truss: front and back spans + two towers
   const spanGeo = own(trussGeometry(26));
   const towerGeo = own(trussGeometry(12));
   for (const z of [-15.6, -22.2]) {
@@ -407,129 +539,178 @@ export function createVenue(opts: VenueOptions): VenueHandle {
     }
   }
 
-  /* ---------- moving heads ---------- */
+  /* ---------- moving heads + light pools ---------- */
+  const beamMaterial = (uniforms: MovingHead["uniforms"]) =>
+    own(
+      new THREE.ShaderMaterial({
+        uniforms,
+        vertexShader: BEAM_VERT,
+        fragmentShader: BEAM_FRAG,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      }),
+    );
   const heads: MovingHead[] = [];
-  const beamGeo = own(new THREE.ConeGeometry(1.5, 22, 28, 1, true));
+  const beamGeo = own(new THREE.ConeGeometry(1.5, 22, 32, 1, true));
   beamGeo.translate(0, -11, 0);
   const headGeo = own(new THREE.BoxGeometry(0.42, 0.5, 0.42));
   const lensGeo = own(new THREE.CircleGeometry(0.16, 16));
-  const headCount = small ? 6 : 10;
+  const poolGeo = own(new THREE.PlaneGeometry(3.6, 3.6));
+  const headCount = small ? 6 : 12;
   for (let i = 0; i < headCount; i++) {
     const x = -11 + (22 / (headCount - 1)) * i;
     const pos = new THREE.Vector3(x, 11.5, i % 2 ? -15.6 : -22.2);
     const pivot = new THREE.Group();
     pivot.position.copy(pos);
-    const body = new THREE.Mesh(headGeo, blackMat);
-    pivot.add(body);
+    pivot.add(new THREE.Mesh(headGeo, blackMat));
     const lens = new THREE.Mesh(lensGeo, yellowGlow);
     lens.rotation.x = Math.PI / 2;
     lens.position.y = -0.26;
     pivot.add(lens);
-    const uniforms = { color: { value: YELLOW.clone() }, intensity: { value: small ? 0.5 : 0.38 } };
-    const beam = new THREE.Mesh(
-      beamGeo,
+    const uniforms = { color: { value: YELLOW.clone() }, intensity: { value: small ? 0.5 : 0.36 }, time: sharedTime };
+    pivot.add(new THREE.Mesh(beamGeo, beamMaterial(uniforms)));
+    scene.add(pivot);
+    const pool = new THREE.Mesh(
+      poolGeo,
       own(
-        new THREE.ShaderMaterial({
-          uniforms,
-          vertexShader: BEAM_VERT,
-          fragmentShader: BEAM_FRAG,
+        new THREE.MeshBasicMaterial({
+          map: glowTex,
+          color: YELLOW,
           transparent: true,
+          opacity: 0.55,
           depthWrite: false,
           blending: THREE.AdditiveBlending,
-          side: THREE.DoubleSide,
         }),
       ),
     );
-    pivot.add(beam);
-    scene.add(pivot);
-    heads.push({ pivot, beam, uniforms, phase: i * 0.9, speed: 0.35 + (i % 3) * 0.1, pos });
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.y = 0.03;
+    scene.add(pool);
+    heads.push({ pivot, uniforms, pool, phase: i * 0.9, speed: 0.32 + (i % 3) * 0.09, pos });
   }
 
-  // uplights either side of the entrance
   for (const side of [-1, 1]) {
     const pivot = new THREE.Group();
-    pivot.position.set(side * 5.2, 0.2, 15.2);
+    pivot.position.set(side * 7.2, 0.2, 15.2);
     pivot.rotation.z = Math.PI + side * 0.08;
-    const uniforms = { color: { value: YELLOW.clone() }, intensity: { value: 0.32 } };
-    const beam = new THREE.Mesh(
-      beamGeo,
-      own(
-        new THREE.ShaderMaterial({
-          uniforms,
-          vertexShader: BEAM_VERT,
-          fragmentShader: BEAM_FRAG,
-          transparent: true,
-          depthWrite: false,
-          blending: THREE.AdditiveBlending,
-          side: THREE.DoubleSide,
-        }),
-      ),
-    );
+    const beam = new THREE.Mesh(beamGeo, beamMaterial({ color: { value: YELLOW.clone() }, intensity: { value: 0.32 }, time: sharedTime }));
     beam.scale.set(0.5, 0.6, 0.5);
     pivot.add(beam);
     scene.add(pivot);
   }
 
+  /* ---------- lasers ---------- */
+  const laserGroup = new THREE.Group();
+  laserGroup.position.set(0, 1.6, -19.8);
+  scene.add(laserGroup);
+  const laserGeo = own(new THREE.BoxGeometry(0.025, 0.025, 46));
+  laserGeo.translate(0, 0, 23);
+  const laserMat = own(
+    new THREE.MeshBasicMaterial({
+      color: CYAN,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
+  );
+  const lasers: THREE.Mesh[] = [];
+  const laserCount = small ? 8 : 14;
+  for (let i = 0; i < laserCount; i++) {
+    const l = new THREE.Mesh(laserGeo, laserMat);
+    laserGroup.add(l);
+    lasers.push(l);
+  }
+
   /* ---------- crowd ---------- */
-  const people: { x: number; z: number; s: number; phase: number; ry: number }[] = [];
-  const crowdTarget = small ? 220 : 460;
+  type Person = { x: number; z: number; s: number; phase: number; ry: number };
+  const standing: Person[] = [];
+  const cheering: Person[] = [];
+  const crowdTarget = small ? 220 : 520;
   let guard = 0;
-  while (people.length < crowdTarget && guard++ < 5000) {
+  while (standing.length + cheering.length < crowdTarget && guard++ < 6000) {
     const x = (Math.random() - 0.5) * 27;
     const z = -14 + Math.random() * 17;
-    if (x > 0.8 && x < 3.4 && z > -6) continue; // aisle the camera walks down
-    people.push({ x, z, s: 0.88 + Math.random() * 0.22, phase: Math.random() * Math.PI * 2, ry: (Math.random() - 0.5) * 0.5 });
+    if (x > 0.8 && x < 3.4 && z > -6) continue; // aisle for the camera
+    const p = { x, z, s: 0.88 + Math.random() * 0.22, phase: Math.random() * Math.PI * 2, ry: (Math.random() - 0.5) * 0.5 };
+    (Math.random() < 0.28 ? cheering : standing).push(p);
   }
-  const crowd = new THREE.InstancedMesh(own(personGeometry()), crowdMat, people.length);
-  scene.add(crowd);
+  const crowdA = new THREE.InstancedMesh(own(personGeometry(false)), crowdMat, standing.length);
+  const crowdB = new THREE.InstancedMesh(own(personGeometry(true)), crowdMat, cheering.length);
+  scene.add(crowdA, crowdB);
   const dummy = new THREE.Object3D();
 
-  // phone screens held up in the crowd
-  const phoneCount = Math.floor(people.length * 0.12);
+  const everyone = [...standing, ...cheering];
+  const phoneCount = Math.floor(everyone.length * 0.12);
   const phonePositions = new Float32Array(phoneCount * 3);
-  const phoneOwners: number[] = [];
-  for (let i = 0; i < phoneCount; i++) phoneOwners.push(Math.floor(Math.random() * people.length));
+  const phoneOwners = Array.from({ length: phoneCount }, () => Math.floor(Math.random() * everyone.length));
   const phoneGeo = own(new THREE.BufferGeometry());
   phoneGeo.setAttribute("position", new THREE.BufferAttribute(phonePositions, 3));
-  const phones = new THREE.Points(
-    phoneGeo,
-    own(new THREE.PointsMaterial({ color: "#dfe8ff", size: 0.09, sizeAttenuation: true })),
-  );
-  scene.add(phones);
+  scene.add(new THREE.Points(phoneGeo, own(new THREE.PointsMaterial({ color: "#dfe8ff", size: 0.09 }))));
 
-  /* ---------- LED cube ---------- */
+  /* ---------- LED cube over the crowd ---------- */
   const cube = new THREE.Group();
-  cube.position.set(8, 6.5, -2);
+  cube.position.set(0, 8.6, -4);
   const cubeFaces: LedPanel[] = [];
+  const cubeSize = 3.2;
   for (let i = 0; i < 4; i++) {
-    const face = makeLed(2.6, 2.6, 56, null);
+    const face = makeLed(cubeSize, cubeSize, 64, null);
+    face.uniforms.brightness.value = 0.85;
     const a = (i * Math.PI) / 2;
-    face.mesh.position.set(Math.sin(a) * 1.3, 0, Math.cos(a) * 1.3);
+    face.mesh.position.set(Math.sin(a) * (cubeSize / 2), 0, Math.cos(a) * (cubeSize / 2));
     face.mesh.rotation.y = a;
     cube.add(face.mesh);
     cubeFaces.push(face);
   }
-  const capGeo = own(new THREE.BoxGeometry(2.62, 0.06, 2.62));
-  for (const y of [-1.31, 1.31]) {
+  const capGeo = own(new THREE.BoxGeometry(cubeSize + 0.04, 0.08, cubeSize + 0.04));
+  for (const y of [-cubeSize / 2, cubeSize / 2]) {
     const cap = new THREE.Mesh(capGeo, blackMat);
     cap.position.y = y;
     cube.add(cap);
   }
+  const ring = new THREE.Mesh(own(new THREE.TorusGeometry(2.6, 0.03, 8, 64)), yellowGlow);
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = -cubeSize / 2 - 0.25;
+  cube.add(ring);
   scene.add(cube);
-  for (const dx of [-1.1, 1.1]) add(new THREE.CylinderGeometry(0.015, 0.015, 8, 4), metalMat, 8 + dx, 11.8, -2);
+  for (const dx of [-1.2, 1.2]) add(new THREE.CylinderGeometry(0.015, 0.015, 6, 4), metalMat, dx, 13.2, -4);
 
-  /* ---------- project screens on the left wall ---------- */
+  /* ---------- project screens along both walls ---------- */
   const projectScreens: LedPanel[] = [];
+  const screenW = 3.9;
+  const screenH = 2.2;
   PROJECTS.forEach((project, i) => {
-    const panel = makeLed(5.4, 3.04, 150, null);
-    const z = 6 - i * 6;
-    panel.mesh.position.set(-17.75, 5.3, z);
-    panel.mesh.rotation.y = Math.PI / 2;
+    const { side, z } = SCREEN_SLOTS[i];
+    const panel = makeLed(screenW, screenH, 140, null);
+    panel.mesh.position.set(side * (WALL_X - 0.05), SCREEN_Y, z);
+    panel.mesh.rotation.y = -side * (Math.PI / 2);
     panel.mesh.userData.project = i;
-    panel.uniforms.brightness.value = 1.1;
+    panel.mesh.userData.baseX = panel.mesh.position.x;
+    panel.uniforms.brightness.value = 0.82;
     scene.add(panel.mesh);
-    add(new THREE.BoxGeometry(0.25, 3.4, 5.8), blackMat, -17.9, 5.3, z);
-    add(new THREE.BoxGeometry(0.08, 0.04, 5.6), yellowGlow, -17.7, 3.6, z);
+    const frame = add(new THREE.BoxGeometry(0.25, screenH + 0.3, screenW + 0.3), blackMat, side * (WALL_X + 0.1), SCREEN_Y, z);
+    frame.userData.side = side;
+    add(new THREE.BoxGeometry(0.06, 0.04, screenW), yellowGlow, side * (WALL_X - 0.08), SCREEN_Y - screenH / 2 - 0.3, z);
+    // a wash of light on the wall above each screen
+    const wash = add(
+      new THREE.PlaneGeometry(4.4, 2.6),
+      own(
+        new THREE.MeshBasicMaterial({
+          map: glowTex,
+          color: "#ffd99a",
+          transparent: true,
+          opacity: 0.05,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+        }),
+      ),
+      side * (WALL_X - 0.02),
+      SCREEN_Y + 1.9,
+      z,
+    );
+    wash.rotation.y = -side * (Math.PI / 2);
     getTexture(project.image, (tex, aspect) => {
       panel.uniforms.mapA.value = tex;
       panel.uniforms.mapB.value = tex;
@@ -540,17 +721,15 @@ export function createVenue(opts: VenueOptions): VenueHandle {
   });
 
   /* ---------- stills on towers + cube ---------- */
-  const stillSlots = [...towers, ...cubeFaces];
+  const stillSlots = [...towers, ...cubeFaces.slice(1)];
   stillSlots.forEach((panel, i) => {
-    const src = STILLS[i % STILLS.length];
-    getTexture(src, (tex, aspect) => {
+    getTexture(STILLS[i % STILLS.length], (tex, aspect) => {
       panel.uniforms.mapA.value = tex;
-      fitCover(panel.uniforms.fitA.value, aspect, panel.aspect);
       panel.uniforms.mapB.value = tex;
+      fitCover(panel.uniforms.fitA.value, aspect, panel.aspect);
       fitCover(panel.uniforms.fitB.value, aspect, panel.aspect);
     });
   });
-  // one cube face plays the reel
   cubeFaces[0].uniforms.mapA.value = videoTex;
   cubeFaces[0].uniforms.mapB.value = videoTex;
 
@@ -566,8 +745,27 @@ export function createVenue(opts: VenueOptions): VenueHandle {
   };
   video.addEventListener("loadedmetadata", onMeta);
 
-  /* ---------- haze / dust ---------- */
-  const dustCount = small ? 500 : 1400;
+  /* ---------- confetti for the finale ---------- */
+  const confettiCount = small ? 220 : 600;
+  const confetti = new THREE.InstancedMesh(
+    own(new THREE.PlaneGeometry(0.07, 0.12)),
+    own(new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, toneMapped: false })),
+    confettiCount,
+  );
+  const confettiState = Array.from({ length: confettiCount }, () => ({
+    x: (Math.random() - 0.5) * 22,
+    y: Math.random() * 13,
+    z: -17 + Math.random() * 16,
+    v: 0.6 + Math.random() * 0.9,
+    spin: Math.random() * 6,
+    phase: Math.random() * 6,
+  }));
+  const palette = [YELLOW, WHITE, new THREE.Color("#ffd36b"), new THREE.Color("#ffffff")];
+  confettiState.forEach((_, i) => confetti.setColorAt(i, palette[i % palette.length]));
+  scene.add(confetti);
+
+  /* ---------- haze ---------- */
+  const dustCount = small ? 500 : 1500;
   const dustPos = new Float32Array(dustCount * 3);
   for (let i = 0; i < dustCount; i++) {
     dustPos[i * 3] = (Math.random() - 0.5) * 34;
@@ -591,12 +789,19 @@ export function createVenue(opts: VenueOptions): VenueHandle {
   );
   scene.add(dust);
 
-  // nothing to wait for in the loader (e.g. all cached) → still report ready
   if (!pending.size) queueMicrotask(onReady);
 
   /* ---------- camera path ---------- */
-  const posCurve = new THREE.CatmullRomCurve3(STATIONS.map((s) => new THREE.Vector3(...s.pos)), false, "centripetal");
-  const lookCurve = new THREE.CatmullRomCurve3(STATIONS.map((s) => new THREE.Vector3(...s.look)), false, "centripetal");
+  const posCurve = new THREE.CatmullRomCurve3(
+    STATIONS.map((s) => new THREE.Vector3(...s.pos)),
+    false,
+    "centripetal",
+  );
+  const lookCurve = new THREE.CatmullRomCurve3(
+    STATIONS.map((s) => new THREE.Vector3(...s.look)),
+    false,
+    "centripetal",
+  );
   const segments = STATIONS.length - 1;
 
   let station = 0;
@@ -608,12 +813,16 @@ export function createVenue(opts: VenueOptions): VenueHandle {
   const tmpLook = new THREE.Vector3();
   const tmpDir = new THREE.Vector3();
   const tmpTarget = new THREE.Vector3();
+  const focus = new THREE.Vector3();
+  const lastCam = new THREE.Vector3();
   const down = new THREE.Vector3(0, -1, 0);
   const clock = new THREE.Clock();
   let frame = 0;
   let hovered: number | null = null;
   let lastSwap = 0;
   let swapIndex = 0;
+  let fovKick = 0;
+  let prevT = 0;
 
   function resize() {
     const w = window.innerWidth;
@@ -622,7 +831,6 @@ export function createVenue(opts: VenueOptions): VenueHandle {
     composer?.setSize(w, h);
     bloom?.resolution.set(w / 2, h / 2);
     camera.aspect = w / h;
-    camera.fov = w / h < 0.8 ? 66 : small ? 62 : 50;
     camera.updateProjectionMatrix();
   }
 
@@ -630,55 +838,112 @@ export function createVenue(opts: VenueOptions): VenueHandle {
     frame = requestAnimationFrame(tick);
     if (!active) return;
     const t = clock.getElapsedTime();
+    const dt = Math.min(0.05, t - prevT);
+    prevT = t;
+    sharedTime.value = t;
+    if (grain) grain.uniforms.time.value = t;
     const motion = reducedMotion ? 0.25 : 1;
 
-    // ease the camera towards the scroll position so wheel steps glide
-    smoothStation += (station - smoothStation) * (reducedMotion ? 1 : 0.08);
+    // camera: follow the scroll along the path, with a little handheld life
+    smoothStation += (station - smoothStation) * (reducedMotion ? 1 : 0.09);
     const u = clamp01(smoothStation / segments);
     posCurve.getPoint(u, camera.position);
     lookCurve.getPoint(u, tmpLook);
-    camera.position.x += pointer.x * 0.35 * motion;
-    camera.position.y += pointer.y * 0.18 * motion;
+    camera.position.x += (pointer.x * 0.35 + Math.sin(t * 0.9) * 0.04) * motion;
+    camera.position.y += (pointer.y * 0.18 + Math.sin(t * 1.3 + 1) * 0.03) * motion;
     camera.lookAt(tmpLook);
 
-    // finale: the LED wall switches to the call to action and the beams converge on stage
-    const finaleMix = smooth(4.2, 4.9, smoothStation);
-    mainLed.uniforms.mixB.value = finaleMix;
+    // speed zoom: widen the lens while the camera is travelling
+    const speed = dt > 0 ? camera.position.distanceTo(lastCam) / dt : 0;
+    lastCam.copy(camera.position);
+    fovKick += (Math.min(9, speed * 0.55) * motion - fovKick) * 0.08;
+    const aspectFov = camera.aspect < 0.8 ? 66 : baseFov;
+    camera.fov = aspectFov + fovKick;
+    camera.updateProjectionMatrix();
 
-    for (const h of heads) {
+    const finaleMix = smooth(FINALE - 0.8, FINALE - 0.1, smoothStation);
+    const workMix = smooth(WORK_START - 0.6, WORK_START, smoothStation) * (1 - smooth(WORK_START + PROJECTS.length - 1, WORK_START + PROJECTS.length - 0.3, smoothStation));
+    const laserMix = Math.max(clamp01(1 - Math.abs(smoothStation - 1) * 1.2), finaleMix);
+    mainLed.uniforms.mixB.value = finaleMix;
+    galleryLight.intensity = workMix * 22;
+
+    // moving heads sweep the room; they converge on stage for the finale
+    heads.forEach((h, i) => {
       const sweep = t * h.speed * motion + h.phase;
       tmpTarget.set(Math.sin(sweep) * 11, 0, -5 + Math.cos(sweep * 0.8) * 9);
-      const focus = new THREE.Vector3(Math.sin(t * 0.5 + h.phase) * 1.5, 1.2, -16);
+      focus.set(Math.sin(t * 0.5 + h.phase) * 1.5, 1.2, -16);
       tmpTarget.lerp(focus, finaleMix);
       tmpDir.subVectors(tmpTarget, h.pos).normalize();
       h.pivot.quaternion.setFromUnitVectors(down, tmpDir);
       const c = h.uniforms.color.value;
       const k = (Math.sin(t * 0.3 + h.phase) + 1) / 2;
-      c.copy(YELLOW).lerp(h.phase % 2 > 1 ? BLUE : WHITE, k * (1 - finaleMix));
+      c.copy(YELLOW).lerp(i % 2 ? BLUE : WHITE, k * (1 - finaleMix));
       if (finaleMix < 0.5 && Math.sin(t * 0.21 + h.phase * 2) > 0.92) c.lerp(MAGENTA, 0.6);
-    }
-
-    // crowd sways; jumps a little at the finale
-    const energy = 0.03 + finaleMix * 0.09;
-    people.forEach((p, i) => {
-      const bob = Math.max(0, Math.sin(t * (2.1 + finaleMix * 1.4) + p.phase)) * energy * motion;
-      dummy.position.set(p.x, bob, p.z);
-      dummy.rotation.set(0, p.ry, 0);
-      dummy.scale.setScalar(p.s);
-      dummy.updateMatrix();
-      crowd.setMatrixAt(i, dummy.matrix);
+      h.uniforms.intensity.value = (small ? 0.5 : 0.36) * (1 - workMix * 0.55);
+      // light pool where the beam meets the floor
+      const along = -h.pos.y / tmpDir.y;
+      h.pool.position.set(h.pos.x + tmpDir.x * along, 0.03, h.pos.z + tmpDir.z * along);
+      const mat = h.pool.material as THREE.MeshBasicMaterial;
+      mat.color.copy(c);
+      mat.opacity = 0.5 * (1 - workMix * 0.5);
     });
-    crowd.instanceMatrix.needsUpdate = true;
+
+    // lasers fan out over the crowd
+    laserMat.opacity = laserMix * (0.85 - finaleMix * 0.45);
+    laserMat.color.copy(CYAN).lerp(YELLOW, finaleMix);
+    lasers.forEach((l, i) => {
+      const spread = (i / (lasers.length - 1) - 0.5) * 1.6;
+      l.rotation.y = spread + Math.sin(t * 0.8 * motion + i) * 0.25;
+      l.rotation.x = -0.12 - (Math.sin(t * 0.6 * motion + i * 0.5) + 1) * 0.12;
+    });
+    laserGroup.visible = laserMix > 0.01;
+
+    // crowd sways; the finale gets them jumping
+    const energy = 0.03 + finaleMix * 0.12;
+    rimColor.value.copy(BLUE).lerp(FINALE_RIM, finaleMix);
+    rimStrength.value = 1.2 - finaleMix * 0.55;
+    const place = (mesh: THREE.InstancedMesh, list: Person[], jumpBoost: number) => {
+      list.forEach((p, i) => {
+        const bob = Math.max(0, Math.sin(t * (2.1 + finaleMix * 1.6) + p.phase)) * energy * jumpBoost * motion;
+        dummy.position.set(p.x, bob, p.z);
+        dummy.rotation.set(0, p.ry + Math.sin(t * 0.7 + p.phase) * 0.08 * motion, 0);
+        dummy.scale.setScalar(p.s);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+    };
+    place(crowdA, standing, 1);
+    place(crowdB, cheering, 1.6);
     phoneOwners.forEach((owner, i) => {
-      const p = people[owner];
-      const up = Math.sin(t * 0.7 + p.phase) > -0.2 ? 1 : 0;
+      const p = everyone[owner];
+      const up = Math.sin(t * 0.7 + p.phase) > -0.2;
       phonePositions[i * 3] = p.x + 0.12;
       phonePositions[i * 3 + 1] = up ? 1.75 * p.s + 0.25 : -5;
       phonePositions[i * 3 + 2] = p.z;
     });
     phoneGeo.attributes.position.needsUpdate = true;
 
-    cube.rotation.y = t * 0.25 * motion;
+    // confetti rains during the finale
+    confetti.visible = finaleMix > 0.02;
+    if (confetti.visible) {
+      confettiState.forEach((c, i) => {
+        c.y -= c.v * dt * motion;
+        if (c.y < 0) {
+          c.y = 12 + Math.random() * 2;
+          c.x = (Math.random() - 0.5) * 22;
+        }
+        dummy.position.set(c.x + Math.sin(t * 1.5 + c.phase) * 0.3, c.y, c.z);
+        dummy.rotation.set(t * c.spin, t * c.spin * 0.7, c.phase);
+        dummy.scale.setScalar(finaleMix);
+        dummy.updateMatrix();
+        confetti.setMatrixAt(i, dummy.matrix);
+      });
+      confetti.instanceMatrix.needsUpdate = true;
+    }
+
+    cube.rotation.y = t * 0.22 * motion;
+    ring.rotation.z = t * 0.6;
     dust.rotation.y = t * 0.01;
     stageWash.color.setHSL(0.62 - finaleMix * 0.5, 0.7, 0.55);
 
@@ -687,9 +952,7 @@ export function createVenue(opts: VenueOptions): VenueHandle {
       lastSwap = t;
       swapIndex++;
       stillSlots.forEach((panel, i) => {
-        if (panel === cubeFaces[0]) return;
-        const src = STILLS[(i + swapIndex) % STILLS.length];
-        getTexture(src, (tex, aspect) => {
+        getTexture(STILLS[(i + swapIndex) % STILLS.length], (tex, aspect) => {
           panel.uniforms.mapA.value = panel.uniforms.mapB.value;
           panel.uniforms.fitA.value.copy(panel.uniforms.fitB.value);
           panel.uniforms.mapB.value = tex;
@@ -698,12 +961,10 @@ export function createVenue(opts: VenueOptions): VenueHandle {
         });
       });
     }
-    for (const panel of stillSlots) {
-      if (panel === cubeFaces[0]) continue;
-      panel.uniforms.mixB.value = Math.min(1, panel.uniforms.mixB.value + 0.03);
-    }
+    for (const panel of stillSlots) panel.uniforms.mixB.value = Math.min(1, panel.uniforms.mixB.value + 0.03);
 
-    // hover the project screens
+    // project screens: the one the camera is visiting lights up and leans out from the wall
+    const visiting = Math.round(smoothStation - WORK_START);
     if (pointerNdc.x <= 1) {
       raycaster.setFromCamera(pointerNdc, camera);
       const hit = raycaster.intersectObjects(
@@ -718,7 +979,10 @@ export function createVenue(opts: VenueOptions): VenueHandle {
       }
     }
     projectScreens.forEach((p, i) => {
-      p.uniforms.hover.value += ((hovered === i ? 1 : 0) - p.uniforms.hover.value) * 0.15;
+      const on = hovered === i || (workMix > 0.5 && visiting === i) ? 1 : 0;
+      p.uniforms.hover.value += (on - p.uniforms.hover.value) * 0.1;
+      const side = SCREEN_SLOTS[i].side;
+      p.mesh.position.x = (p.mesh.userData.baseX as number) - side * p.uniforms.hover.value * 0.35;
     });
 
     if (composer) composer.render();

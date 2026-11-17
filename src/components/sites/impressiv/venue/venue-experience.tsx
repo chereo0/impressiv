@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { PROJECTS, VIDEO_SRC } from "./content";
+import { Hud } from "./hud";
 import type { VenueHandle } from "./scene";
+import { emitStation, SmoothScroll } from "./scroll";
 import styles from "./venue.module.css";
 
 const smooth = (a: number, b: number, t: number) => {
@@ -75,7 +77,14 @@ export function VenueExperience() {
       const sections = [...document.querySelectorAll<HTMLElement>("[data-station]")];
       if (!sections.length) return;
       const center = window.scrollY + window.innerHeight / 2;
-      const anchors = sections.map((s) => s.getBoundingClientRect().top + window.scrollY + s.offsetHeight / 2);
+      // a section with data-steps="n" owns n consecutive stops, spread evenly over its height
+      const anchors = sections.flatMap((s) => {
+        const top = s.getBoundingClientRect().top + window.scrollY;
+        const steps = Number(s.dataset.steps ?? 1);
+        if (steps === 1) return [top + s.offsetHeight / 2];
+        const usable = s.offsetHeight - window.innerHeight;
+        return Array.from({ length: steps }, (_, k) => top + window.innerHeight / 2 + (usable * k) / (steps - 1));
+      });
       let station = 0;
       if (center >= anchors[anchors.length - 1]) station = anchors.length - 1;
       else {
@@ -90,7 +99,7 @@ export function VenueExperience() {
       }
       stationRef.current = station;
       handleRef.current?.setStation(station);
-      document.documentElement.style.setProperty("--iv-station", station.toFixed(3));
+      emitStation(station);
     };
     const onScroll = () => {
       if (!raf) raf = requestAnimationFrame(update);
@@ -107,6 +116,8 @@ export function VenueExperience() {
 
   return (
     <>
+      <SmoothScroll />
+      <Hud />
       <div className={cn(styles.backdrop, failed && styles.backdropFallback)} aria-hidden="true">
         <canvas ref={canvasRef} className={styles.canvas} />
         <video ref={videoRef} src={VIDEO_SRC} muted loop playsInline preload="auto" className={styles.hiddenVideo} />
@@ -115,7 +126,7 @@ export function VenueExperience() {
       <div className={cn(styles.screenTip, hoverProject !== null && styles.screenTipOn)} aria-live="polite">
         {hoverProject !== null && (
           <>
-            <b>{PROJECTS[hoverProject].title}</b> · click to view
+            <b>{PROJECTS[hoverProject].title}</b> · {PROJECTS[hoverProject].year} · click to view
           </>
         )}
       </div>
