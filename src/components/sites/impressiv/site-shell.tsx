@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import styles from "./impressiv.module.css";
+import { SoundToggle } from "./sound-toggle";
 
 const NAV = [
   { label: "Work", href: "/work" },
@@ -65,6 +66,7 @@ export function SiteShell({ children, scene }: { children: ReactNode; scene?: Re
     <div className={styles.root}>
       {/* rendered outside the page wrapper so the menu's push transform doesn't move it */}
       {scene}
+      <SoundToggle />
       <header className={cn(styles.header, solid && styles.headerSolid, open && styles.pushed)}>
           <Link href="/" aria-label="ImpressIV home">
             <Image
